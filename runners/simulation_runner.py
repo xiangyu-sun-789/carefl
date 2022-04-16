@@ -11,9 +11,9 @@ import seaborn as sns
 from data.generate_synth_data import gen_synth_causal_dat, intervention_sem
 from models import RECI, ANM, EntropyLR, CAREFL
 
-
 # make sure matplotlib doesn't use Type 3 fonts
 import matplotlib
+
 matplotlib.rcParams['pdf.fonttype'] = 42
 matplotlib.rcParams['ps.fonttype'] = 42
 
@@ -86,7 +86,7 @@ def run_simulations(args, config):
             mod = CAREFL(config)
         else:
             raise ValueError('Unknown algorithm')
-        p, direction = mod.predict_proba(data=data)
+        p, direction = mod.predict_proba(data=data)  # data shape: (N, d)
         if not np.isnan(p):
             per_correct += direction == mod_dir
             results['p'].append(p)
@@ -267,7 +267,6 @@ def plot_width_vs_depth(args, config):
 
     res_all_w = {s: {a: {nh: [] for nh in nhs} for a in algos} for s in sim_type}
     res_all_d = {s: {a: {nl: [] for nl in nls} for a in algos} for s in sim_type}
-
 
     for s in sim_type:
         for (a, ap) in zip(algos, algo_path):
