@@ -122,6 +122,7 @@ def main():
     # set random seeds
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
+    print("seed: ", args.seed)
 
     # causal discovery
     if args.simulation:

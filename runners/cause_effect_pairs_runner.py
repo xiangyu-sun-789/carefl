@@ -257,9 +257,12 @@ def run_cause_effect_pairs(args, config):
     depthList = [5]
 
     for i in range(1, 108):
+        print("")
         if i in skipPairs:
+            print("skip id: ", i)
             pass
         else:
+            print("running id: ", i)
             res, predModel, trueModel, ctsRatio = runCEPair(i, LayerList, depthList, priorDist=priorDist,
                                                             TrainSplit=SplitPerc, epochs=epochs, optMethod=optMethod,
                                                             scaleDat=scaleDat, verbose=True)
