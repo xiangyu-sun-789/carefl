@@ -274,3 +274,5 @@ def run_cause_effect_pairs(args, config):
                     correctCount_nobinary += 1
 
             print('running mean: ' + str(float(correctCount) / runningCount))
+            print('correctCount: ' + str(correctCount))
+            print('runningCount: ' + str(runningCount))
