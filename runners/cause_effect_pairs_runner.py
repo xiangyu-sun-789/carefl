@@ -224,9 +224,9 @@ def runCEPair(pair_id, Nlayers, Nhidden, priorDist='laplace', TrainSplit=1., epo
             loss_cond_rev = flow_mod_cond_rev.train(epochs=epochs, optMethod=optMethod, verbose=False)
 
             # evaluate on test data
-            results.loc[(results.L == l) & (results.nh == nh), 'x->y'] = np.nanmean(flow_mod_cond.EvalLL(testDat_id))
-            results.loc[(results.L == l) & (results.nh == nh), 'y->x'] = np.nanmean(
-                flow_mod_cond_rev.EvalLL(testDat_id[:, [1, 0]]))
+            results.loc[(results.L == l) & (results.nh == nh), 'x->y'] = float(np.nanmean(flow_mod_cond.EvalLL(testDat_id)))
+            results.loc[(results.L == l) & (results.nh == nh), 'y->x'] = float(np.nanmean(
+                flow_mod_cond_rev.EvalLL(testDat_id[:, [1, 0]])))
 
     print(results)
     # compute the consensus
