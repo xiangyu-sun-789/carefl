@@ -48,14 +48,15 @@ class MY_CAREFL:
         self.dim = None
         self.direction = 'none'
 
+        if type(self.n_layers) is list:
+            raise Exception("self.n_layers cannot be a list.")
+
+        if type(self.n_hidden) is list:
+            raise Exception("self.n_hidden cannot be a list.")
+
     def flow_lr(self, data, return_scores=False):
         """
         For each direction, fit a flow model, then compute the log-likelihood ratio to determine causal direction.
-
-        If `n_layers` and/or `n_hidden` are lists, then, *for each direction*:
-            - create a flow for each combination
-            - return the flow with highest test likelihood
-        Note that this means that the flow parameters can be different for each direction.
 
         Parameters:
         ----------
@@ -79,13 +80,13 @@ class MY_CAREFL:
 
         # Conditional Flow Model: X->Y
         torch.manual_seed(self.config.training.seed)
-        flows_xy, _ = self._train(dset)
-        _, score_xy, _, _ = self._evaluate(flows_xy, test_dset)
+        flow_xy, _ = self._train(dset)
+        score_xy = self._evaluate(flow_xy, test_dset)
 
         # Conditional Flow Model: Y->X
         torch.manual_seed(self.config.training.seed)
-        flows_yx, _ = self._train(dset, parity=True)
-        _, score_yx, _, _ = self._evaluate(flows_yx, test_dset, parity=True)
+        flow_yx, _ = self._train(dset, parity=True)
+        score_yx = self._evaluate(flow_yx, test_dset, parity=True)
 
         # compute LR
         p = score_xy - score_yx
@@ -147,79 +148,60 @@ class MY_CAREFL:
             else:
                 raise NotImplementedError('Architecture {} not understood.'.format(self.config.flow.architecture))
 
-        # support training multiple flows for varying depth and width, and keep only best
-        self.n_layers = self.n_layers if type(self.n_layers) is list else [self.n_layers]
-        self.n_hidden = self.n_hidden if type(self.n_hidden) is list else [self.n_hidden]
-        normalizing_flows = []
-        for nl in self.n_layers:
-            for nh in self.n_hidden:
-                # construct normalizing flows
-                flow_list = [ar_flow(nh) for _ in range(nl)]
-                normalizing_flows.append(NormalizingFlowModel(prior, flow_list).to(self.device))
-        return normalizing_flows
+        # construct normalizing flows
+        flow_list = [ar_flow(self.n_hidden) for _ in range(self.n_layers)]
+        normalizing_flow = NormalizingFlowModel(prior, flow_list).to(self.device)
+
+        return normalizing_flow
 
     def _train(self, dset, parity=False):
         """
         Train one or multiple flors for a single direction, specified by `parity`.
         """
         train_loader = DataLoader(dset, shuffle=True, batch_size=self.config.training.batch_size)
-        flows = self._get_flow_arch(parity)
-        all_loss_vals = []
-        for flow in flows:
-            optimizer, scheduler = self._get_optimizer(flow.parameters())
-            flow.train()
-            loss_vals = []
-            for e in range(self.epochs):
-                loss_val = 0
-                for _, x in enumerate(train_loader):
-                    x = x.to(self.device)
-                    if parity and self.config.flow.architecture == 'spline':
-                        # spline flows don't have parity option and should only be used with 2D numpy data:
-                        x = x[:, [1, 0]]
-                    # compute loss
-                    _, prior_logprob, log_det = flow(x)
-                    loss = - torch.sum(prior_logprob + log_det)
-                    loss_val += loss.item()
-                    # optimize
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
+        flow = self._get_flow_arch(parity)
 
-                if self.config.optim.scheduler:
-                    scheduler.step(loss_val / len(train_loader))
-                if self.verbose:
-                    print('epoch {}/{} \tloss: {}'.format(e, self.epochs, loss_val))
-                loss_vals.append(loss_val)
-            all_loss_vals.append(loss_vals)
-        return flows, all_loss_vals
+        optimizer, scheduler = self._get_optimizer(flow.parameters())
 
-    def _get_params_from_idx(self, idx):  # for debug
-        return self.n_layers[idx // len(self.n_hidden)], self.n_hidden[idx % len(self.n_hidden)]
+        flow.train()
+        loss_vals = []
+        for e in range(self.epochs):
+            loss_val = 0
+            for _, x in enumerate(train_loader):
+                x = x.to(self.device)
+                if parity and self.config.flow.architecture == 'spline':
+                    # spline flows don't have parity option and should only be used with 2D numpy data:
+                    x = x[:, [1, 0]]
+                # compute loss
+                _, prior_logprob, log_det = flow(x)
+                loss = - torch.sum(prior_logprob + log_det)
+                loss_val += loss.item()
+                # optimize
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
 
-    def _evaluate(self, flows, test_dset, parity=False):
+            if self.config.optim.scheduler:
+                scheduler.step(loss_val / len(train_loader))
+            if self.verbose:
+                print('epoch {}/{} \tloss: {}'.format(e, self.epochs, loss_val))
+            loss_vals.append(loss_val)
+
+        return flow, loss_vals
+
+    def _evaluate(self, flow, test_dset, parity=False):
         """
-        Evaluate a set of flows on test dataset, and return the one with best test likelihood.
+        Evaluate the trained flow on test dataset.
         """
         loader = DataLoader(test_dset, batch_size=128)
-        scores = []
-        for idx, flow in enumerate(flows):
-            if parity and self.config.flow.architecture == 'spline':
-                # spline flows don't have parity option and should only be used with 2D numpy data:
-                score = np.nanmean(np.concatenate([flow.log_likelihood(x.to(self.device)[:, [1, 0]]) for x in loader]))
-            else:
-                score = np.nanmean(np.concatenate([flow.log_likelihood(x.to(self.device)) for x in loader]))
-            scores.append(score)
-        try:
-            # in case all scores are nan, this will raise a ValueError
-            idx = np.nanargmax(scores)
-        except ValueError:
-            # arbitrarily pick flows[0], this doesn't matter since best_score = nan, which will
-            idx = 0
-        # unlike nanargmax, nanmax only raises a RuntimeWarning when all scores are nan, and will return nan
-        best_score = np.nanmax(scores)
-        best_flow = flows[idx]
-        nl, nh = self._get_params_from_idx(idx)  # for debug
-        return best_flow, best_score, nl, nh
+
+        if parity and self.config.flow.architecture == 'spline':
+            # spline flows don't have parity option and should only be used with 2D numpy data:
+            score = np.nanmean(np.concatenate([flow.log_likelihood(x.to(self.device)[:, [1, 0]]) for x in loader]))
+        else:
+            score = np.nanmean(np.concatenate([flow.log_likelihood(x.to(self.device)) for x in loader]))
+
+        return score
 
     def _get_datasets(self, input):
         """
