@@ -161,7 +161,7 @@ class MY_CAREFL:
         return score
 
 
-def MYCAREFL_get_datasets(config, input):
+def prepare_datasets(config, input):
     """
     Check data type, which can be:
         - an np.ndarray, in which case split it and wrap it into a train Dataset and and a test Dataset
@@ -188,18 +188,18 @@ def MYCAREFL_get_datasets(config, input):
         return input[0], input[1], dim
 
 
-def compare_likelihoods(score_xy, score_yx):
+def compare_likelihoods(score1, direction1, score2, direction2):
     # compute likelihood ratio
-    p = score_xy - score_yx
-    est_direction = infer_direction(p)
+    p = score1 - score2
+    est_direction = infer_direction(p, direction1, direction2)
     return est_direction, p
 
 
-def infer_direction(p):
+def infer_direction(p, direction1, direction2):
     if p > 0:
-        direction = 'x->y'
+        direction = direction1
     elif p < 0:
-        direction = 'y->x'
+        direction = direction2
     else:
         direction = 'no conclusion'
 
