@@ -75,18 +75,18 @@ class MY_CAREFL:
         score_yx: list
             If `return_scores` is True, return all test likelihoods of the different flows trained for 'y->x'
         """
-        dset, test_dset, dim = self._get_datasets(data)
+        training_dataset, testing_dataset, dim = self._get_datasets(data)
         self.dim = dim
 
         # Conditional Flow Model: X->Y
         torch.manual_seed(self.config.training.seed)
-        flow_xy, _ = self._train(dset)
-        score_xy = self._evaluate(flow_xy, test_dset)
+        flow_xy, _ = self._train(training_dataset)
+        score_xy = self._evaluate(flow_xy, testing_dataset)
 
         # Conditional Flow Model: Y->X
         torch.manual_seed(self.config.training.seed)
-        flow_yx, _ = self._train(dset, parity=True)
-        score_yx = self._evaluate(flow_yx, test_dset, parity=True)
+        flow_yx, _ = self._train(training_dataset, parity=True)
+        score_yx = self._evaluate(flow_yx, testing_dataset, parity=True)
 
         # compute LR
         p = score_xy - score_yx
@@ -156,7 +156,7 @@ class MY_CAREFL:
 
     def _train(self, dset, parity=False):
         """
-        Train one or multiple flors for a single direction, specified by `parity`.
+        Train one flow for a single direction, specified by `parity`.
         """
         train_loader = DataLoader(dset, shuffle=True, batch_size=self.config.training.batch_size)
         flow = self._get_flow_arch(parity)
