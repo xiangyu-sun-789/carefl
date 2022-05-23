@@ -36,7 +36,7 @@ class MY_CAREFL:
 
     """
 
-    def __init__(self, config):
+    def __init__(self, config, dim):
         self.config = config
         self.n_layers = config.flow.nl
         self.n_hidden = config.flow.nh
@@ -45,7 +45,7 @@ class MY_CAREFL:
         self.verbose = config.training.verbose
 
         # initial guess on correct model to be updated after each fit
-        self.dim = None
+        self.dim = dim
         self.direction = 'none'
 
         if type(self.n_layers) is list:
@@ -53,48 +53,6 @@ class MY_CAREFL:
 
         if type(self.n_hidden) is list:
             raise Exception("self.n_hidden cannot be a list.")
-
-    def flow_lr(self, data, return_scores=False):
-        """
-        For each direction, fit a flow model, then compute the log-likelihood ratio to determine causal direction.
-
-        Parameters:
-        ----------
-        data: numpy.ndarray
-            A dataset where the first half of the columns are observations of a (multivariate)
-            random variable X, and the second half are those of a (multivariate) r.v. Y.
-        return_scores: bool
-            If True, return the lists of the test likelihoods of the multiple flows trained for each direction.
-
-        Returns:
-        ----------
-        p: float
-            The test likelihood which indicates direction.
-        score_xy: list
-            If `return_scores` is True, return all test likelihoods of the different flows trained for 'x->y'
-        score_yx: list
-            If `return_scores` is True, return all test likelihoods of the different flows trained for 'y->x'
-        """
-        training_dataset, testing_dataset, dim = self._get_datasets(data)
-        self.dim = dim
-
-        # Conditional Flow Model: X->Y
-        torch.manual_seed(self.config.training.seed)
-        flow_xy, _ = self._train(training_dataset)
-        score_xy = self._evaluate(flow_xy, testing_dataset)
-
-        # Conditional Flow Model: Y->X
-        torch.manual_seed(self.config.training.seed)
-        flow_yx, _ = self._train(training_dataset, parity=True)
-        score_yx = self._evaluate(flow_yx, testing_dataset, parity=True)
-
-        # compute LR
-        p = score_xy - score_yx
-        self._update_direction(p)
-        if return_scores:
-            return p, score_xy, score_yx
-        else:
-            return p
 
     def _get_optimizer(self, parameters):
         """
@@ -117,7 +75,6 @@ class MY_CAREFL:
         parity: bool
             If True, the flow follows the (1, 2) permutations, otherwise it follows the (2, 1) permutation.
         """
-        # this method only gets called by _train, which in turn is only called after self.dim has been initialized
         dim = self.dim
         # prior
         if self.config.flow.prior_dist == 'laplace':
@@ -203,31 +160,47 @@ class MY_CAREFL:
 
         return score
 
-    def _get_datasets(self, input):
-        """
-        Check data type, which can be:
-            - an np.ndarray, in which case split it and wrap it into a train Dataset and and a test Dataset
-            - a Dataset, in which case duplicate it (test dataset is the same as train dataset)
-            - a tuple of Datasets, in which case just return.
-        return a train Dataset, and a test Dataset
-        """
-        assert isinstance(input, (np.ndarray, Dataset, tuple, list))
-        if isinstance(input, np.ndarray):
-            dim = input.shape[-1]
-            if self.config.training.split == 1.:
-                data_test = np.copy(input)
-            else:
-                data_test = np.copy(input[int(self.config.training.split * input.shape[0]):])
-                input = input[:int(self.config.training.split * input.shape[0])]
-            dset = CustomSyntheticDatasetDensity(input.astype(np.float32))
-            test_dset = CustomSyntheticDatasetDensity(data_test.astype(np.float32))
-            return dset, test_dset, dim
-        if isinstance(input, Dataset):
-            dim = input[0].shape[-1]
-            return input, input, dim
-        if isinstance(input, (tuple, list)):
-            dim = input[0][0].shape[-1]
-            return input[0], input[1], dim
 
-    def _update_direction(self, p):
-        self.direction = 'x->y' if p >= 0 else 'y->x'
+def MYCAREFL_get_datasets(config, input):
+    """
+    Check data type, which can be:
+        - an np.ndarray, in which case split it and wrap it into a train Dataset and and a test Dataset
+        - a Dataset, in which case duplicate it (test dataset is the same as train dataset)
+        - a tuple of Datasets, in which case just return.
+    return a train Dataset, and a test Dataset
+    """
+    assert isinstance(input, (np.ndarray, Dataset, tuple, list))
+    if isinstance(input, np.ndarray):
+        dim = input.shape[-1]
+        if config.training.split == 1.:
+            data_test = np.copy(input)
+        else:
+            data_test = np.copy(input[int(config.training.split * input.shape[0]):])
+            input = input[:int(config.training.split * input.shape[0])]
+        dset = CustomSyntheticDatasetDensity(input.astype(np.float32))
+        test_dset = CustomSyntheticDatasetDensity(data_test.astype(np.float32))
+        return dset, test_dset, dim
+    if isinstance(input, Dataset):
+        dim = input[0].shape[-1]
+        return input, input, dim
+    if isinstance(input, (tuple, list)):
+        dim = input[0][0].shape[-1]
+        return input[0], input[1], dim
+
+
+def compare_likelihoods(score_xy, score_yx):
+    # compute likelihood ratio
+    p = score_xy - score_yx
+    est_direction = infer_direction(p)
+    return est_direction, p
+
+
+def infer_direction(p):
+    if p > 0:
+        direction = 'x->y'
+    elif p < 0:
+        direction = 'y->x'
+    else:
+        direction = 'no conclusion'
+
+    return direction
